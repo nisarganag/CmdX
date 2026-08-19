@@ -1,0 +1,7 @@
+.build/
+dist/
+.DS_Store
+*.dmg
+.superpowers/
+docs/
+.vscode/
