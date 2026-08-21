@@ -1,4 +1,5 @@
 import AppKit
+import CmdXCore
 
 @MainActor
 final class StatusItemController {
@@ -22,9 +23,15 @@ final class StatusItemController {
         }
     }
 
-    var onToggleEnabled: ((Bool) -> Void)?
-    private(set) var isEnabled = true {
+    var onToggleEnabled: ((Set<Feature>) -> Void)?
+    private(set) var enabledFeatures: Set<Feature> = Set(Feature.allCases) {
         didSet { updateIcon() }
+    }
+
+    /// Applies the persisted choice at launch without echoing it back to disk.
+    func setEnabledFeatures(_ features: Set<Feature>) {
+        enabledFeatures = features
+        rebuildMenu()
     }
 
     private var isArmed = false
@@ -45,9 +52,17 @@ final class StatusItemController {
     /// CmdX is switched off or has no Accessibility permission, so Cmd+X and
     /// Cmd+V are currently doing whatever macOS does by default.
     private func updateIcon() {
-        let active = isEnabled && accessibilityGranted && tapRunning
+        let active = !enabledFeatures.isEmpty && accessibilityGranted && tapRunning
         let name = isArmed ? "scissors.circle.fill" : "scissors"
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "CmdX")
+        // Stock SF Symbols render heavy in the menu bar next to Apple's own
+        // items. An explicit lighter weight and a slightly smaller size for the
+        // filled variant keep both states optically the same size.
+        let config = NSImage.SymbolConfiguration(
+            pointSize: isArmed ? 14.0 : 15.5,
+            weight: .regular,
+            scale: .medium)
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "CmdX")?
+            .withSymbolConfiguration(config)
         image?.isTemplate = true
         statusItem.button?.image = image
         statusItem.button?.alphaValue = active ? 1.0 : 0.4
@@ -56,21 +71,29 @@ final class StatusItemController {
     func rebuildMenu() {
         let menu = NSMenu()
 
-        let toggle = NSMenuItem(
-            title: "Cut & Paste Enabled",
-            action: #selector(toggleEnabled),
-            keyEquivalent: "")
-        toggle.target = self
-        toggle.state = isEnabled ? .on : .off
-        menu.addItem(toggle)
+        // View-based rows so the menu stays open across several clicks, and so the
+        // labels can share a fixed shortcut column instead of being padded with
+        // spaces that only line up in a monospaced font.
+        addRow(to: menu,
+               shortcut: "⌘X / ⌘V",
+               label: "Cut and paste files",
+               isOn: enabledFeatures.contains(.cutPaste)) { [weak self] _ in
+            self?.toggle(.cutPaste)
+        }
 
-        let login = NSMenuItem(
-            title: "Launch at Login",
-            action: #selector(toggleLoginItem),
-            keyEquivalent: "")
-        login.target = self
-        login.state = LoginItem.isEnabled ? .on : .off
-        menu.addItem(login)
+        addRow(to: menu,
+               shortcut: "⌫",
+               label: "Delete to Trash",
+               isOn: enabledFeatures.contains(.trash)) { [weak self] _ in
+            self?.toggle(.trash)
+        }
+
+        addRow(to: menu,
+               shortcut: "",
+               label: "Launch at login",
+               isOn: LoginItem.isEnabled) { [weak self] _ in
+            self?.setLoginItem()
+        }
 
         menu.addItem(.separator())
 
@@ -89,8 +112,8 @@ final class StatusItemController {
         }
 
         menu.addItem(.separator())
-        menu.addItem(withTitle: "⌘X cuts · ⌘V pastes in Finder", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: "CmdX 1.0.0", action: nil, keyEquivalent: "")
+        menu.addItem(withTitle: "⌘X cut · ⌘V paste · ⌫ trash", action: nil, keyEquivalent: "")
+        menu.addItem(withTitle: "CmdX 1.1.0", action: nil, keyEquivalent: "")
 
         let quit = NSMenuItem(title: "Quit CmdX", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -99,13 +122,29 @@ final class StatusItemController {
         statusItem.menu = menu
     }
 
-    @objc private func toggleEnabled() {
-        isEnabled.toggle()
-        onToggleEnabled?(isEnabled)
-        rebuildMenu()
+    private func addRow(
+        to menu: NSMenu,
+        shortcut: String,
+        label: String,
+        isOn: Bool,
+        onToggle: @escaping (Bool) -> Void
+    ) {
+        let item = NSMenuItem()
+        item.view = ToggleMenuRow(
+            shortcut: shortcut, label: label, isOn: isOn, onToggle: onToggle)
+        menu.addItem(item)
     }
 
-    @objc private func toggleLoginItem() {
+    private func toggle(_ feature: Feature) {
+        if enabledFeatures.contains(feature) {
+            enabledFeatures.remove(feature)
+        } else {
+            enabledFeatures.insert(feature)
+        }
+        onToggleEnabled?(enabledFeatures)
+    }
+
+    private func setLoginItem() {
         let target = !LoginItem.isEnabled
         if let failure = LoginItem.setEnabled(target) {
             let alert = NSAlert()
@@ -113,8 +152,8 @@ final class StatusItemController {
             alert.informativeText =
                 failure + "\n\nCmdX usually needs to live in /Applications for this to work."
             alert.runModal()
+            rebuildMenu()
         }
-        rebuildMenu()
     }
 
     @objc private func openAccessibilitySettings() {

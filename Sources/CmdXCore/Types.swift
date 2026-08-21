@@ -1,16 +1,47 @@
-/// The only two keys CmdX ever intercepts.
+/// The only keys CmdX ever intercepts.
 public enum Key: Sendable, Hashable {
     case x
     case v
+    /// The main Delete key (backspace). Deliberately NOT forward-delete
+    /// (keycode 117): fn+Delete must keep deleting forward in text.
+    case delete
 
     /// Maps a CoreGraphics virtual keycode. Returns nil for every other key.
     public init?(virtualKeyCode: Int64) {
         switch virtualKeyCode {
         case 7: self = .x
         case 9: self = .v
+        case 51: self = .delete
         default: return nil
         }
     }
+
+    /// Which switchable feature this key belongs to.
+    public var feature: Feature {
+        switch self {
+        case .x, .v: return .cutPaste
+        case .delete: return .trash
+        }
+    }
+
+    /// Whether this key is intercepted with Command held, or completely bare.
+    /// Cut and paste ride on Command; Delete is a naked keystroke, so the two
+    /// need opposite modifier rules.
+    public var requiresCommand: Bool {
+        switch self {
+        case .x, .v: return true
+        case .delete: return false
+        }
+    }
+}
+
+/// The two things CmdX does, each independently switchable so a user can take
+/// one without the other.
+public enum Feature: Sendable, Hashable, CaseIterable {
+    /// Cmd+X cut and Cmd+V paste-as-move.
+    case cutPaste
+    /// Bare Delete moves the selection to the Trash.
+    case trash
 }
 
 public enum Phase: Sendable, Hashable {
@@ -26,6 +57,8 @@ public enum Decision: Sendable, Hashable {
     case swallowAndCopy
     /// Discard the event and synthesize Cmd+Option+V in its place.
     case swallowAndMove
+    /// Discard the event and synthesize Cmd+Delete in its place.
+    case swallowAndTrash
     /// Discard the event and synthesize nothing (a matching key release).
     case swallow
 }
@@ -44,7 +77,7 @@ public enum CutState: Sendable, Hashable {
 public struct Input: Sendable, Hashable {
     public let key: Key
     public let phase: Phase
-    public let isEnabled: Bool
+    public let enabledFeatures: Set<Feature>
     public let isFinderFrontmost: Bool
     public let isTextFieldFocused: Bool
     public let pasteboardChangeCount: Int
@@ -53,7 +86,7 @@ public struct Input: Sendable, Hashable {
     public init(
         key: Key,
         phase: Phase,
-        isEnabled: Bool = true,
+        enabledFeatures: Set<Feature> = [.cutPaste, .trash],
         isFinderFrontmost: Bool = true,
         isTextFieldFocused: Bool = false,
         pasteboardChangeCount: Int = 0,
@@ -61,7 +94,7 @@ public struct Input: Sendable, Hashable {
     ) {
         self.key = key
         self.phase = phase
-        self.isEnabled = isEnabled
+        self.enabledFeatures = enabledFeatures
         self.isFinderFrontmost = isFinderFrontmost
         self.isTextFieldFocused = isTextFieldFocused
         self.pasteboardChangeCount = pasteboardChangeCount

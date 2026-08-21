@@ -15,9 +15,11 @@ final class EventTapService {
     /// Fires whenever a cut is armed or cleared, so the icon can follow.
     var onArmedChange: ((Bool) -> Void)?
 
-    var isEnabled = true {
+    var enabledFeatures: Set<Feature> = Set(Feature.allCases) {
         didSet {
-            guard !isEnabled else { return }
+            // Dropping cut/paste must clear a pending cut. Otherwise switching it
+            // back on later would resurrect an arm whose pasteboard has moved on.
+            guard !enabledFeatures.contains(.cutPaste) else { return }
             machine.invalidate()
             onArmedChange?(false)
         }
@@ -133,18 +135,23 @@ final class EventTapService {
         // state machine just returns .passThrough for it.
         if phase == .down {
             let flags = event.flags
-            guard flags.contains(.maskCommand),
-                  !flags.contains(.maskAlternate),
-                  !flags.contains(.maskShift),
-                  !flags.contains(.maskControl)
-            else { return false }
+            // Delegated to CmdXCore so the rule is unit-tested. It is the guard
+            // that keeps CmdX away from Cmd+Option+Delete, which deletes
+            // permanently with no Trash and no undo.
+            guard ModifierGate.shouldConsider(key: key, modifiers: .init(
+                command: flags.contains(.maskCommand),
+                option: flags.contains(.maskAlternate),
+                shift: flags.contains(.maskShift),
+                control: flags.contains(.maskControl),
+                fn: flags.contains(.maskSecondaryFn)
+            )) else { return false }
         }
 
         let inFinder = frontmost.isFinderFrontmost
         let input = Input(
             key: key,
             phase: phase,
-            isEnabled: isEnabled,
+            enabledFeatures: enabledFeatures,
             isFinderFrontmost: inFinder,
             isTextFieldFocused: inFinder
                 ? focus.isTextFieldFocused(pid: frontmost.finderPID)
@@ -169,6 +176,11 @@ final class EventTapService {
         case .swallowAndCopy:
             synthesizer.sendCopy()
             scheduleArmingResolution()
+            onArmedChange?(machine.isArmed)
+            return true
+
+        case .swallowAndTrash:
+            synthesizer.sendMoveToTrash()
             onArmedChange?(machine.isArmed)
             return true
 

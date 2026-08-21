@@ -30,11 +30,24 @@ public final class CutStateMachine {
         }
 
         // Rule 1 — gating. Checked first and unconditionally.
-        guard input.isEnabled, input.isFinderFrontmost, !input.isTextFieldFocused else {
+        // Rule 11 — each key is gated by its own feature, so cut/paste and
+        // trash can be switched on independently of each other.
+        guard input.enabledFeatures.contains(input.key.feature),
+              input.isFinderFrontmost,
+              !input.isTextFieldFocused
+        else {
             return .passThrough
         }
 
         switch input.key {
+        case .delete:
+            // Rule 10 — a bare Delete on the file list becomes Cmd+Delete, so
+            // Finder moves the selection to the Trash. Stateless on purpose: it
+            // must not disturb a pending cut, since deleting one file has no
+            // bearing on a different file already cut.
+            swallowedDowns.insert(.delete)
+            return .swallowAndTrash
+
         case .x:
             // Rule 2 — swallow, synthesize Cmd+C, and wait for the pasteboard.
             state = .arming(preCount: input.pasteboardChangeCount)

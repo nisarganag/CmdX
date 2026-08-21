@@ -21,6 +21,27 @@ let variants: [(pixels: Int, names: [String])] = [
     (1024, ["icon_512x512@2x.png"]),
 ]
 
+/// Apple's icon silhouette is a superellipse, not a circular-radius rounded
+/// rect. Circular corners are the single most obvious tell that an icon was not
+/// made for macOS — they bulge where Apple's curve stays taut.
+func squircle(in rect: CGRect, exponent: Double = 5.0) -> NSBezierPath {
+    let path = NSBezierPath()
+    let a = rect.width / 2, b = rect.height / 2
+    let cx = rect.midX, cy = rect.midY
+    let steps = 720
+
+    for i in 0...steps {
+        let t = Double(i) / Double(steps) * 2 * Double.pi
+        let ct = cos(t), st = sin(t)
+        let x = pow(abs(ct), 2.0 / exponent) * (ct < 0 ? -1 : 1) * a
+        let y = pow(abs(st), 2.0 / exponent) * (st < 0 ? -1 : 1) * b
+        let point = NSPoint(x: cx + x, y: cy + y)
+        if i == 0 { path.move(to: point) } else { path.line(to: point) }
+    }
+    path.close()
+    return path
+}
+
 func render(pixels: Int) -> Data? {
     let dim = CGFloat(pixels)
     guard let rep = NSBitmapImageRep(
@@ -35,48 +56,81 @@ func render(pixels: Int) -> Data? {
     guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = ctx
+    ctx.imageInterpolation = .high
 
-    // Rounded-rect background, matching the macOS icon silhouette.
-    let inset = dim * 0.06
-    let rect = CGRect(x: inset, y: inset, width: dim - inset * 2, height: dim - inset * 2)
-    let radius = dim * 0.22
-    let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-    path.addClip()
+    // macOS icons sit inside their canvas with real margin, and cast a soft
+    // shadow onto it. Filling the whole square is another non-native tell.
+    let margin = dim * 0.095
+    let body = CGRect(x: margin, y: margin * 1.25,
+                      width: dim - margin * 2, height: dim - margin * 2)
+    let shape = squircle(in: body)
+
+    if pixels >= 64 {
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.28)
+        shadow.shadowBlurRadius = dim * 0.035
+        shadow.shadowOffset = NSSize(width: 0, height: -dim * 0.018)
+        shadow.set()
+        NSColor.black.setFill()
+        shape.fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    shape.addClip()
 
     NSGradient(colors: [
-        NSColor(calibratedRed: 0.29, green: 0.53, blue: 0.98, alpha: 1),
-        NSColor(calibratedRed: 0.12, green: 0.26, blue: 0.72, alpha: 1),
-    ])?.draw(in: rect, angle: -90)
+        NSColor(calibratedWhite: 0.24, alpha: 1),
+        NSColor(calibratedWhite: 0.075, alpha: 1),
+    ])?.draw(in: body, angle: -90)
 
-    // White scissors glyph, centred.
-    let config = NSImage.SymbolConfiguration(pointSize: dim * 0.46, weight: .semibold)
+    // A bright sliver along the top edge reads as a lit surface and gives the
+    // face some curvature instead of leaving it a flat swatch.
+    NSGradient(colors: [
+        NSColor(calibratedWhite: 1, alpha: 0.13),
+        NSColor(calibratedWhite: 1, alpha: 0.0),
+    ])?.draw(in: CGRect(x: body.minX, y: body.midY,
+                        width: body.width, height: body.height / 2), angle: -90)
+
+    NSGraphicsContext.restoreGraphicsState()
+
+    // Hairline rim, so the icon holds an edge against a light background.
+    NSColor(calibratedWhite: 1, alpha: 0.15).setStroke()
+    shape.lineWidth = max(1, dim * 0.004)
+    shape.stroke()
+
+    // Scissors glyph, centred on the body rather than the canvas.
+    let config = NSImage.SymbolConfiguration(pointSize: dim * 0.40, weight: .regular)
     if let symbol = NSImage(systemSymbolName: "scissors", accessibilityDescription: nil)?
         .withSymbolConfiguration(config) {
         let size = symbol.size
         let target = CGRect(
-            x: (dim - size.width) / 2,
-            y: (dim - size.height) / 2,
+            x: body.midX - size.width / 2,
+            y: body.midY - size.height / 2,
             width: size.width,
             height: size.height)
-        // Tint the glyph white on its own isolated transparent canvas, then
-        // composite the result onto the icon with plain source-over.
-        //
-        // Flooding white via sourceAtop directly onto `target` (as drawn on the
-        // icon canvas) does not isolate the glyph's shape: sourceAtop only
-        // preserves shape where destination alpha is non-uniform, and by this
-        // point the background gradient has already made the destination alpha
-        // 1 everywhere under `target`, so the flood paints the entire bounding
-        // rect solid white instead of just the scissors strokes. Doing the
-        // tint on a fresh transparent NSImage first (alpha 0 outside the glyph)
-        // keeps the recolor scoped to the glyph's own shape.
-        let whiteSymbol = NSImage(size: size)
-        whiteSymbol.lockFocus()
+
+        // Tint on an isolated transparent canvas. Flooding sourceAtop directly
+        // onto the icon would fill the whole glyph rect, because the gradient
+        // underneath is already opaque and leaves nothing for it to key against.
+        let tinted = NSImage(size: size)
+        tinted.lockFocus()
         symbol.draw(in: CGRect(origin: .zero, size: size))
         NSColor.white.set()
         CGRect(origin: .zero, size: size).fill(using: .sourceAtop)
-        whiteSymbol.unlockFocus()
+        tinted.unlockFocus()
 
-        whiteSymbol.draw(in: target)
+        NSGraphicsContext.saveGraphicsState()
+        if pixels >= 64 {
+            let glyphShadow = NSShadow()
+            glyphShadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.55)
+            glyphShadow.shadowBlurRadius = dim * 0.018
+            glyphShadow.shadowOffset = NSSize(width: 0, height: -dim * 0.008)
+            glyphShadow.set()
+        }
+        tinted.draw(in: target)
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     NSGraphicsContext.restoreGraphicsState()

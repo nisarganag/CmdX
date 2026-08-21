@@ -6,7 +6,7 @@
 
 **Windows-style cut & paste for macOS Finder.**
 
-`⌘X` cuts. `⌘V` pastes. Your files *move* instead of copying.
+`⌘X` cuts. `⌘V` pastes. `⌫` deletes. The way you already expect them to.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://www.apple.com/macos/)
 ![Architecture](https://img.shields.io/badge/arch-universal%20(arm64%20%2B%20x86__64)-blue)
@@ -25,12 +25,13 @@ macOS *can* move files with the keyboard — but it hides it behind a shortcut a
 |---|---|---|
 | Copy a file | `⌘C` → `⌘V` | `⌘C` → `⌘V` *(unchanged)* |
 | **Move a file** | `⌘C` → **`⌘⌥V`** | **`⌘X` → `⌘V`** |
+| **Delete a file** | **`⌘⌫`** | **`⌫`** |
 
-If you've ever come from Windows and pressed `⌘X` in Finder expecting a cut, this fixes that.
+If you've ever come from Windows and pressed `⌘X` in Finder expecting a cut, or tapped `⌫` expecting a file to disappear, this fixes both.
 
 ## What it does
 
-CmdX lives in your menu bar, watches for `⌘X` and `⌘V` **only while Finder is frontmost**, and rewrites them into the commands Finder already understands — `⌘C` for cut, and `⌘⌥V` ("Move Item Here") for paste.
+CmdX lives in your menu bar, watches for `⌘X`, `⌘V` and `⌫` **only while Finder is frontmost**, and rewrites them into the commands Finder already understands — `⌘C` for cut, `⌘⌥V` ("Move Item Here") for paste, and `⌘⌫` for delete.
 
 **Finder performs every file operation.** CmdX never touches a file itself. That means you keep:
 
@@ -40,21 +41,39 @@ CmdX lives in your menu bar, watches for `⌘X` and `⌘V` **only while Finder i
 
 ### Context decides what the keys mean
 
-| Where you are | `⌘X` does |
-|---|---|
-| Finder file list (icon, list, column or gallery view) | Cuts **files** |
-| Renaming a file, or in the search box | Cuts **text** |
-| Any app that isn't Finder | Nothing — untouched |
-| `⌘⌥V` and `⌘⇧V` anywhere | Untouched — Finder's native shortcuts still work |
+| Where you are | `⌘X` does | `⌫` does |
+|---|---|---|
+| Finder file list (icon, list, column or gallery view) | Cuts **files** | Moves files to **Trash** |
+| Renaming a file, or in the search box | Cuts **text** | **Backspace**, as always |
+| Any app that isn't Finder | Nothing — untouched | Nothing — untouched |
+
+`fn+⌫` always stays forward-delete. `⌘⌥V`, `⌘⇧V`, `⌘⌫`, `⌥⌫` and `⌘⌥⌫` are all left exactly as macOS defines them — including `⌘⌥⌫`, the permanent delete, which CmdX deliberately never touches.
 
 ### It won't surprise you
 
 - **A cut expires when you copy something else.** Cut a file, then copy anything in any app, and the pending cut is silently dropped — a forgotten `⌘X` can never turn a later paste into an unexpected move.
 - **`⌘X` on an empty selection does nothing.** No phantom cut left armed.
-- **Holding `⌘V` pastes once**, not once per key-repeat tick.
+- **Holding a key acts once.** This matters most for `⌫`: Finder selects the next file after trashing one, so without this a held Delete would walk down a folder emptying it.
+- **Delete means Trash, never permanent.** CmdX synthesizes `⌘⌫`, so deleted files land in the Trash and `⌘Z` brings them straight back. `⌘⌥⌫` — macOS's delete-with-no-undo — is something CmdX deliberately never touches, and there's a test whose only job is to keep it that way.
 - **If anything goes wrong, your keystroke passes through untouched.** CmdX is built to fail toward stock macOS behaviour rather than swallow input.
 
-The menu bar icon fills in ✂️ while a cut is pending, and dims when CmdX is disabled or lacks permission.
+### Take one feature, or both
+
+The two behaviours are switched independently from the menu bar, so you're never forced into both:
+
+```text
+Cut and paste files      ⌘X / ⌘V     ▓▓○
+Delete to Trash          ⌫           ▓▓○
+Launch at login                      ▓▓○
+```
+
+Want Windows-style cut and paste but find a bare Delete key too risky? Turn Delete off and keep the rest. Your choice is saved and survives relaunch and login — a preference that quietly reset itself every morning would be worse than no preference at all.
+
+The menu stays open while you flip switches, so setting up takes one visit rather than one per toggle.
+
+The menu bar icon fills in ✂️ while a cut is pending, and dims when both features are off or CmdX lacks permission.
+
+> **On the Delete key:** a bare `⌫` is much easier to hit by accident than `⌘X`. That's exactly why it goes to the Trash rather than deleting outright, why a held key only fires once, and why any failure in CmdX's focus detection results in *nothing being deleted* rather than the reverse.
 
 ---
 
@@ -86,9 +105,9 @@ CmdX needs **Accessibility** access (System Settings → Privacy & Security → 
 
 Concretely, CmdX uses that access to:
 
-- see `⌘X` / `⌘V` key events and decide whether to consume them
+- see `⌘X` / `⌘V` / `⌫` key events and decide whether to consume them
 - ask Finder whether a text field currently has focus, so it knows whether you mean *cut this file* or *cut this text*
-- send Finder the synthetic `⌘C` / `⌘⌥V` that do the actual work
+- send Finder the synthetic `⌘C` / `⌘⌥V` / `⌘⌫` that do the actual work
 
 It does not log keystrokes, read your clipboard contents, or make network requests. [The source is right here](Sources/) — the entire decision logic is one small file, [`CutStateMachine.swift`](Sources/CmdXCore/CutStateMachine.swift).
 
@@ -134,7 +153,7 @@ Grant Accessibility when prompted, and you're done.
 swift run CmdXCoreTests
 ```
 
-40 assertions covering the full decision table — every gating rule, the cut/paste state transitions, stale-cut invalidation, key-repeat handling and key-release tracking.
+74 assertions covering the full decision table — every gating rule, the cut/paste state transitions, stale-cut invalidation, key-repeat handling and key-release tracking.
 
 There's no XCTest here on purpose: XCTest and swift-testing both ship with Xcode, and this project deliberately builds with Command Line Tools alone. The suite is a plain executable target with a small assertion harness that exits non-zero on failure, so it works in CI and in a bare terminal alike.
 
@@ -144,16 +163,19 @@ There's no XCTest here on purpose: XCTest and swift-testing both ship with Xcode
 Sources/
   CmdXCore/            pure decision logic — no AppKit, fully unit-tested
     CutStateMachine.swift    the entire interception policy lives here
-    Types.swift              Key, Phase, Decision, CutState, Input
-  CmdXCoreTests/       executable test target (40 assertions)
+    Types.swift              Key, Feature, Phase, Decision, CutState, Input
+    ModifierGate.swift       which modifier combinations CmdX may touch
+  CmdXCoreTests/       executable test target (74 assertions)
   CmdXApp/             the AppKit shell — deliberately thin, holds no policy
     EventTapService.swift    CGEventTap: creation, callback, recovery
     FocusInspector.swift     asks Finder what has keyboard focus
     FrontmostWatcher.swift   caches "is Finder frontmost"
-    KeySynthesizer.swift     posts the synthetic ⌘C / ⌘⌥V
+    KeySynthesizer.swift     posts the synthetic ⌘C / ⌘⌥V / ⌘⌫
     PermissionMonitor.swift  Accessibility grant polling + recovery
     StatusItemController.swift  menu bar icon and menu
+    ToggleMenuRow.swift      view-based menu row that stays open on click
     LoginItem.swift          SMAppService registration
+    Preferences.swift        persists which features are switched on
 Tools/
   makeicon.swift       renders the app icon from an SF Symbol — no binary assets
 build.sh               build → bundle → sign → package
@@ -184,9 +206,9 @@ Grant it when prompted. You only hit this when rebuilding — install once and i
 
 CmdX has permission but couldn't install its event tap. It retries automatically every 2 seconds, so this usually clears itself. If it persists, quit and relaunch.
 
-### `⌘X` does nothing in Finder
+### `⌘X` or `⌫` does nothing in Finder
 
-Check the menu bar icon. If it's dimmed, either **Cut & Paste Enabled** is switched off, or Accessibility isn't actually granted — see above.
+Open the menu and check that the relevant feature is ticked — they're switched separately, so one can be off while the other works. If the icon is dimmed, both are off or Accessibility isn't actually granted (see above).
 
 ### macOS says the app is damaged
 

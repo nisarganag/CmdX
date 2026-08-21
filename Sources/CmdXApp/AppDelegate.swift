@@ -23,8 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         tap = service
 
-        status.onToggleEnabled = { enabled in
-            service.isEnabled = enabled
+        let saved = Preferences.loadEnabledFeatures()
+        status.setEnabledFeatures(saved)
+        service.enabledFeatures = saved
+
+        status.onToggleEnabled = { features in
+            service.enabledFeatures = features
+            Preferences.save(features)
         }
 
         let monitor = PermissionMonitor { granted in

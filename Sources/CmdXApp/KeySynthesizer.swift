@@ -9,6 +9,7 @@ final class KeySynthesizer {
 
     private let keyC: CGKeyCode = 8
     private let keyV: CGKeyCode = 9
+    private let keyDelete: CGKeyCode = 51
 
     func sendCopy() {
         post(keyCode: keyC, flags: .maskCommand)
@@ -17,6 +18,13 @@ final class KeySynthesizer {
     /// Finder's "Move Item Here" — the native command CmdX rebinds Cmd+V onto.
     func sendMoveHere() {
         post(keyCode: keyV, flags: [.maskCommand, .maskAlternate])
+    }
+
+    /// Finder's "Move to Trash". Deliberately Cmd+Delete and not
+    /// Cmd+Option+Delete: the latter deletes immediately with no undo, and a bare
+    /// Delete key is far too easy to press by accident to wire to that.
+    func sendMoveToTrash() {
+        post(keyCode: keyDelete, flags: .maskCommand)
     }
 
     private func post(keyCode: CGKeyCode, flags: CGEventFlags) {
