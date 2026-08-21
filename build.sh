@@ -52,6 +52,13 @@ PLIST
 echo "==> Rendering icon"
 swift "$ROOT/Tools/makeicon.swift" "$DIST/AppIcon.iconset"
 iconutil -c icns "$DIST/AppIcon.iconset" -o "$CONTENTS/Resources/AppIcon.icns"
+
+# Keep the README's header image in step with the real icon. It drifted once
+# already: a hand-copied PNG kept showing the old blue icon on GitHub for a whole
+# release after the icon had been redesigned.
+mkdir -p "$ROOT/assets"
+cp "$DIST/AppIcon.iconset/icon_256x256.png" "$ROOT/assets/icon.png"
+
 rm -rf "$DIST/AppIcon.iconset"
 
 echo "==> Signing (ad-hoc)"
